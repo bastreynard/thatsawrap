@@ -399,7 +399,7 @@ def get_tidal_playlists():
         for idx, item in enumerate(data):
             attr = item.get("attributes")
             name = attr.get('name', 'Untitled')
-            numItems = attr.get('numberOfItems')
+            numItems = attr.get('numberOfItems', 0)
             print(f'  Playlist {idx+1}: {name} (id={item.get("id")}, tracks={numItems})')
             playlists.append({
                 'id': item.get('id'),
@@ -521,43 +521,50 @@ def transfer_playlist():
         if not track:
             continue
         
-        track_name = track.get('name', '')
+        track_name = track.get('name', '').replace('/', '')
         artist_name = track['artists'][0]['name'] if track.get('artists') else ''
         
         # Search on Tidal
         search_response = requests.get(
-            f'https://openapi.tidal.com/v2/searchResults/{track_name}%20{artist_name}',
+            f'https://openapi.tidal.com/v2/searchResults/{artist_name}%20{track_name}/relationships/tracks',
             headers={'Authorization': f'Bearer {tidal_token}'},
             params={
-                'include': 'tracks',
-                'limit': 1,
-                'countryCode': 'US'
+                'explicitFilter': 'include',
+                'countryCode': 'US',
             }
         )
-        
+        # print("================== SEARCH RESULT =================")
+        # print(search_response.json())
+
         if search_response.status_code == 200:
-            search_data = search_response.json()
-            tracks = search_data.get('tracks', {}).get('items', [])
-            
-            if tracks:
-                tidal_track_id = tracks[0].get('id')
+            search_data = search_response.json().get('data')
+            tidal_track_id = search_data[0].get('id')
+            if tidal_track_id:
+                search_response = requests.get(
+                    f'https://openapi.tidal.com/v2/searchResults/{tidal_track_id}',
+                    headers={'Authorization': f'Bearer {tidal_token}'},
+                    params={
+                        'countryCode': 'US',
+                    }
+                )
+                # Add track to playlist
+                add_response = requests.post(
+                    f'https://openapi.tidal.com/v2/playlists/{tidal_playlist_id}/relationships/items',
+                    headers=tidal_headers,
+                    params={'countryCode': 'US'},
+                    json={
+                        "data": [{
+                            "type": "tracks",
+                            "id": str(tidal_track_id)
+                        }],
+                    }
+                )
                 
-                if tidal_track_id:
-                    # Add track to playlist
-                    add_response = requests.post(
-                        f'https://openapi.tidal.com/v2/playlists/{tidal_playlist_id}/items',
-                        headers=tidal_headers,
-                        params={'countryCode': 'US'},
-                        json={'trackIds': [str(tidal_track_id)]}
-                    )
-                    
-                    if add_response.status_code in [200, 201, 204]:
-                        added_count += 1
-                        print(f'✓ Added: {track_name} - {artist_name}')
-                    else:
-                        print(f'✗ Failed to add: {track_name} - {artist_name}')
-                        not_found.append(f'{track_name} - {artist_name}')
+                if add_response.status_code in [200, 201, 204]:
+                    added_count += 1
+                    print(f'✓ Added: {track_name} - {artist_name}')
                 else:
+                    print(f'✗ Failed to add: {track_name} - {artist_name}')
                     not_found.append(f'{track_name} - {artist_name}')
             else:
                 not_found.append(f'{track_name} - {artist_name}')
@@ -565,10 +572,9 @@ def transfer_playlist():
     
     print(f'\n=== Transfer complete ===')
     print(f'Added: {added_count}/{len(spotify_tracks)}')
-    print(f'Not found: {len(not_found)}')
     
     return jsonify({
-        'success': True,
+        'success': added_count != 0,
         'playlist_name': playlist_name,
         'total_tracks': len(spotify_tracks),
         'tracks_added': added_count,

@@ -46,7 +46,7 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /var/www/html && \
     chown -R appuser:appuser /var/log/nginx && \
     chown -R appuser:appuser /var/lib/nginx && \
-    chown -R appuser:appuser /dev/stdout && \
+    chown -R appuser:appuser /var/log/supervisor && \
     touch /run/nginx.pid && \
     chown appuser:appuser /run/nginx.pid
 
