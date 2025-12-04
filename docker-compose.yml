@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.single
+    container_name: spotify-tidal-app
+    ports:
+      - "8080:8080"
+    environment:
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - SPOTIFY_REDIRECT_URI=${SPOTIFY_REDIRECT_URI:-http://localhost:8080/api/callback/spotify}
+      - TIDAL_CLIENT_ID=${TIDAL_CLIENT_ID}
+      - TIDAL_CLIENT_SECRET=${TIDAL_CLIENT_SECRET}
+      - TIDAL_REDIRECT_URI=${TIDAL_REDIRECT_URI:-http://localhost:8080/api/callback/tidal}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8080}
+      - SECRET_KEY=${SECRET_KEY}
+      - FLASK_ENV=production
+    volumes:
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/api/auth/status')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
