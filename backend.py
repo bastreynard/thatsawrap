@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, redirect, session
+from flask import Flask, request, jsonify, redirect, session, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 from urllib.parse import urlencode
@@ -8,6 +8,8 @@ import os
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+from threading import Lock
+
 
 # Load environment variables
 load_dotenv()
@@ -47,6 +49,18 @@ TIDAL_REDIRECT_URI = os.getenv('TIDAL_REDIRECT_URI', 'http://localhost:5000/call
 # In-memory store for PKCE code verifiers (maps state to verifier)
 pkce_store = {}
 
+# Progress endpoints vars
+transfer_progress = {}
+progress_lock = Lock()
+
+def set_progress(user_id, progress, added=0, total=0, current_track=''):
+    with progress_lock:
+        transfer_progress[user_id] = {'progress': progress, 'added': added, 'total': total, 'current_track': current_track}
+
+def get_progress(user_id):
+    with progress_lock:
+        return transfer_progress.get(user_id, {'progress': 0, 'added': 0, 'total': 0, 'current_track': ''})
+    
 # Spotify OAuth
 @app.route('/auth/spotify')
 def spotify_auth():
@@ -501,7 +515,7 @@ def transfer_playlist():
     print(f'Create playlist response: {create_response.status_code}')
     
     if create_response.status_code not in [200, 201]:
-        status, title = create_response.json().get('status'),create_response.json().get('title')
+        status, title = create_response.json().get('status'), create_response.json().get('title')
         return jsonify({'error': f'Failed to create Tidal playlist : {status} {title}'}), 400
     
     tidal_playlist_data = create_response.json()
@@ -517,10 +531,11 @@ def transfer_playlist():
     added_count = 0
     not_found = []
     
-    for track in spotify_tracks[:50]:  # Limit to first 50
+    for idx, track in enumerate(spotify_tracks[:100]):  # Limit to first 100
         if not track:
             continue
-        
+        progress = int(((idx + 1) / len(spotify_tracks)) * 100)
+        set_progress(session.get("tidal_owner_id"), progress)
         track_name = track.get('name', '').replace('/', '')
         artist_name = track['artists'][0]['name'] if track.get('artists') else ''
         
@@ -533,8 +548,6 @@ def transfer_playlist():
                 'countryCode': 'US',
             }
         )
-        # print("================== SEARCH RESULT =================")
-        # print(search_response.json())
 
         if search_response.status_code == 200:
             search_data = search_response.json().get('data')
@@ -569,10 +582,13 @@ def transfer_playlist():
             else:
                 not_found.append(f'{track_name} - {artist_name}')
                 print(f'✗ Not found on Tidal: {track_name} - {artist_name}')
+        else:
+            not_found.append(f'{track_name} - {artist_name}')
+            print(f'✗ Search failed for: {track_name} - {artist_name}')
     
     print(f'\n=== Transfer complete ===')
     print(f'Added: {added_count}/{len(spotify_tracks)}')
-    
+    set_progress(session.get("tidal_owner_id"), 0, added_count, len(spotify_tracks), track_name)
     return jsonify({
         'success': added_count != 0,
         'playlist_name': playlist_name,
@@ -581,6 +597,11 @@ def transfer_playlist():
         'tracks_not_found': len(not_found),
         'not_found_list': not_found[:10]
     })
+
+@app.route('/transfer-progress')
+def transfer_progress_endpoint():
+    user_id = session.get("tidal_owner_id")
+    return jsonify(get_progress(user_id))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
