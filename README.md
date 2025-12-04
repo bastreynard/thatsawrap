@@ -68,7 +68,7 @@ TIDAL_CLIENT_SECRET=your_tidal_client_secret
 TIDAL_REDIRECT_URI=http://localhost/api/callback/tidal
 
 # Application Configuration
-FRONTEND_URL=http://127.0.0.1:3000
+FRONTEND_URL=http://127.0.0.1:8080
 SECRET_KEY=your_secret_key_here
 
 # Generate a secure SECRET_KEY with:
@@ -101,8 +101,6 @@ make dev
 The application will be available at:
 - **Frontend:** http://localhost (port 80)
 - **Backend API:** http://localhost/api (proxied through Nginx)
-- **Development Frontend:** http://localhost:3000
-- **Development Backend:** http://localhost:5000
 
 ## Using the Makefile
 
@@ -133,7 +131,7 @@ make clean         # Remove containers, images, and volumes
 - `POST /disconnect/tidal` - Disconnect Tidal
 
 ### Playlist Operations
-- `GET /playlists` - Get Spotify playlists
+- `GET /spotify/playlists` - Get Spotify playlists
 - `GET /tidal/playlists` - Get Tidal playlists
 - `POST /transfer` - Transfer playlist from Spotify to Tidal
 
@@ -167,11 +165,11 @@ The Docker image uses Gunicorn as the production WSGI server with:
 |----------|-------------|---------|
 | `SPOTIFY_CLIENT_ID` | Spotify API client ID | Required |
 | `SPOTIFY_CLIENT_SECRET` | Spotify API client secret | Required |
-| `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback URL | `http://localhost:5000/callback/spotify` |
+| `SPOTIFY_REDIRECT_URI` | Spotify OAuth callback URL | `http://127.0.0.1:5000/callback/spotify` |
 | `TIDAL_CLIENT_ID` | Tidal API client ID | Required |
 | `TIDAL_CLIENT_SECRET` | Tidal API client secret | Required |
-| `TIDAL_REDIRECT_URI` | Tidal OAuth callback URL | `http://localhost:5000/callback/tidal` |
-| `FRONTEND_URL` | Frontend application URL | `http://localhost:3000` |
+| `TIDAL_REDIRECT_URI` | Tidal OAuth callback URL | `http://127.0.0.1:5000/callback/tidal` |
+| `FRONTEND_URL` | Frontend application URL | `http://127.0.0.1:8080` |
 | `SECRET_KEY` | Flask session secret key | Required |
 
 ## Obtaining API Credentials
@@ -179,13 +177,13 @@ The Docker image uses Gunicorn as the production WSGI server with:
 ### Spotify
 1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
 2. Create a new app
-3. Add `http://localhost:5000/callback/spotify` to Redirect URIs
+3. Add `http://127.0.0.1:5000/callback/spotify` to Redirect URIs
 4. Copy Client ID and Client Secret
 
 ### Tidal
 1. Go to [Tidal Developer Portal](https://developer.tidal.com/)
 2. Create a new application
-3. Add `http://localhost:5000/callback/tidal` to Redirect URIs
+3. Add `http://127.0.0.1:5000/callback/tidal` to Redirect URIs
 4. Copy Client ID and Client Secret
 
 ## Security Notes
@@ -268,8 +266,16 @@ curl http://localhost:5000/auth/status
 
 ## License
 
-[Your License Here]
+Copyright 2025
 
-## Contributing
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-[Your Contributing Guidelines Here]
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

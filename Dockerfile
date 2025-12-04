@@ -3,12 +3,13 @@ FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy frontend package files
-COPY thatsawrap-react/package*.json ./
-RUN npm ci --only=production
-
-# Copy and build frontend
+# Copy entire frontend directory
 COPY thatsawrap-react/ ./
+
+# Install dependencies - will use existing package-lock or create new one
+RUN npm install --production
+
+# Build the frontend
 RUN npm run build
 
 # Production stage with Python and Nginx
@@ -33,7 +34,7 @@ COPY backend.py .
 COPY --from=frontend-builder /app/frontend/build /var/www/html
 
 # Copy nginx configuration
-COPY nginx-single.conf /etc/nginx/sites-available/default
+COPY nginx.conf /etc/nginx/sites-available/default
 
 # Create supervisor configuration
 RUN mkdir -p /var/log/supervisor
@@ -45,6 +46,7 @@ RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /var/www/html && \
     chown -R appuser:appuser /var/log/nginx && \
     chown -R appuser:appuser /var/lib/nginx && \
+    chown -R appuser:appuser /dev/stdout && \
     touch /run/nginx.pid && \
     chown appuser:appuser /run/nginx.pid
 

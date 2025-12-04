@@ -22,13 +22,15 @@ if not SECRET_KEY:
 
 app.secret_key = SECRET_KEY
 
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
 # Configure session to work with CORS
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False  # Set to True if using HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_DOMAIN'] = None
 
-CORS(app, supports_credentials=True, origins=['http://127.0.0.1:3000'])
+CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 
 # Configuration from environment variables
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
@@ -38,8 +40,6 @@ SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI', 'http://localhost:5000/
 TIDAL_CLIENT_ID = os.getenv('TIDAL_CLIENT_ID')
 TIDAL_CLIENT_SECRET = os.getenv('TIDAL_CLIENT_SECRET')
 TIDAL_REDIRECT_URI = os.getenv('TIDAL_REDIRECT_URI', 'http://localhost:5000/callback/tidal')
-
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 # In-memory store for PKCE code verifiers (maps state to verifier)
 pkce_store = {}
@@ -278,7 +278,7 @@ def disconnect_tidal():
     return jsonify({'success': True})
 
 # Get Spotify playlists
-@app.route('/playlists')
+@app.route('/spotify/playlists')
 def get_playlists():
     token = session.get('spotify_token')
     if not token:
