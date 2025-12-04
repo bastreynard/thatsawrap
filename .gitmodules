@@ -1,0 +1,3 @@
+[submodule "thatsawrap-react"]
+	path = thatsawrap-react
+	url = https://github.com/bastreynard/thatsawrap-react
