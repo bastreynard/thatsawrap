@@ -29,6 +29,9 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = False  # Set to True if using HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_DOMAIN'] = None
+# Production / HTTPS
+# app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+# app.config['SESSION_COOKIE_SECURE'] = True
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 
@@ -105,10 +108,9 @@ def spotify_callback():
         tokens = response.json()
         
         session['spotify_token'] = tokens.get('access_token')
-        session.modified = True  # Force session save
+        session.modified = True
         
         print(f'✓ Spotify token saved: {session["spotify_token"][:20]}...')
-        print(f'✓ Session ID after save: {id(session)}')
         
         return redirect(FRONTEND_URL)
         
@@ -127,10 +129,10 @@ def tidal_auth():
         hashlib.sha256(code_verifier.encode('utf-8')).digest()
     ).decode('utf-8').rstrip('=')
     
-    # Generate a unique state parameter to link challenge and verifier
+    # Generate a unique state parameter
     state = secrets.token_urlsafe(32)
     
-    # Store code_verifier with state as key (in-memory, expires in 10 minutes)
+    # Store code_verifier with state as key
     pkce_store[state] = {
         'verifier': code_verifier,
         'expires': datetime.now() + timedelta(minutes=10)
@@ -179,7 +181,7 @@ def tidal_callback():
         print('Missing code or state parameter')
         return '<h2>Missing parameters</h2><p><a href="/auth/tidal">Try again</a></p>', 400
     
-    # Retrieve code_verifier from in-memory store using state
+    # Retrieve code_verifier
     pkce_data = pkce_store.get(state)
     
     if not pkce_data:
@@ -229,17 +231,15 @@ def tidal_callback():
             return f'<h2>Token exchange failed</h2><p>Status: {response.status_code}</p><pre>{response.text}</pre><p><a href="/auth/tidal">Try again</a></p>', 400
         
         tokens = response.json()
-        
+
         session['tidal_token'] = tokens.get('access_token')
+        session['tidal_owner_id'] = tokens.get('user_id')
         session['tidal_refresh_token'] = tokens.get('refresh_token')
-        session['tidal_user_id'] = tokens.get('user', {}).get('userId') or tokens.get('userId')
-        session.modified = True  # Force session save
+        session.modified = True
         
         print(f'✓ Tidal token saved: {session["tidal_token"][:20]}...')
-        print(f'✓ User ID: {session.get("tidal_user_id")}')
-        print(f'✓ Session saved')
-        
-        # Use server-side redirect instead of JavaScript
+        print(f'✓ Owner ID: {session.get("tidal_owner_id")}')
+
         return redirect(FRONTEND_URL)
         
     except Exception as e:
@@ -249,14 +249,24 @@ def tidal_callback():
 # Check auth status
 @app.route('/auth/status')
 def auth_status():
-    spotify_status = 'spotify_token' in session
-    tidal_status = 'tidal_token' in session
+    print('\n=== Auth Status Check ===')
+    print(f'Session keys: {list(session.keys())}')
     
-    print(f'Auth status check - Spotify: {spotify_status}, Tidal: {tidal_status}')
+    spotify_token = session.get('spotify_token')
+    tidal_token = session.get('tidal_token')
+    tidal_owner_id = session.get('tidal_owner_id')
+    
+    spotify_status = bool(spotify_token)
+    tidal_status = bool(tidal_token)
+    
+    print(f'Spotify authenticated: {spotify_status}')
     if spotify_status:
-        print(f'  Spotify token: {session.get("spotify_token")[:20]}...')
+        print(f'  Spotify token: {spotify_token[:30]}...')
+    
+    print(f'Tidal authenticated: {tidal_status}')
     if tidal_status:
-        print(f'  Tidal token: {session.get("tidal_token")[:20]}...')
+        print(f'  Tidal token: {tidal_token[:30]}...')
+        print(f'  Tidal owner ID: {tidal_owner_id}')
     
     return jsonify({
         'spotify': spotify_status,
@@ -273,7 +283,7 @@ def disconnect_spotify():
 @app.route('/disconnect/tidal', methods=['POST'])
 def disconnect_tidal():
     session.pop('tidal_token', None)
-    session.pop('tidal_user_id', None)
+    session.pop('tidal_owner_id', None)
     print('Tidal disconnected')
     return jsonify({'success': True})
 
@@ -328,7 +338,6 @@ def get_playlists():
         
         print(f'Found {liked_count} liked songs')
         
-        # Add liked songs as a special "playlist"
         if liked_count > 0:
             playlists.insert(0, {
                 'id': 'liked',
@@ -348,79 +357,71 @@ def get_playlists():
 @app.route('/tidal/playlists')
 def get_tidal_playlists():
     token = session.get('tidal_token')
-    user_id = session.get('tidal_user_id')
+    owner_id = session.get('tidal_owner_id')
+
+    print('\n=== Fetching Tidal playlists ===')
+    print(f'Token present: {bool(token)}')
+    print(f'Token preview: {token[:30] if token else None}...')
     
     if not token:
+        print('ERROR: No Tidal token in session')
         return jsonify({'error': 'Not authenticated with Tidal'}), 401
-    
-    print('\n=== Fetching Tidal playlists ===')
-    print(f'User ID: {user_id}')
     
     headers = {
         'Authorization': f'Bearer {token}',
-        'Accept': 'application/json'
+        'Accept': 'application/vnd.api+json'
     }
-    
-    # Try multiple possible endpoints
-    endpoints_to_try = [
-        f'https://listen.tidal.com/v2/my-collection/playlists/folders',
-        f'https://api.tidal.com/v1/users/{user_id}/playlists',
-        f'https://openapi.tidal.com/v2/my-collection/playlists/folders'
-    ]
-    
-    for endpoint in endpoints_to_try:
-        try:
-            print(f'Trying endpoint: {endpoint}')
-            response = requests.get(endpoint, headers=headers)
-            
-            print(f'Response status: {response.status_code}')
-            
-            if response.status_code == 200:
-                data = response.json()
-                print(f'Response data keys: {list(data.keys()) if isinstance(data, dict) else "not a dict"}')
-                playlists = []
-                
-                # Try different response structures
-                items = (
-                    data.get('items') or 
-                    data.get('data') or 
-                    data.get('playlists') or
-                    []
-                )
-                
-                for item in items:
-                    # Handle different playlist structures
-                    if isinstance(item, dict):
-                        playlist_id = item.get('uuid') or item.get('id')
-                        playlist_name = item.get('title') or item.get('name') or 'Untitled'
-                        track_count = item.get('numberOfTracks') or item.get('numberOfItems') or 0
-                        
-                        if playlist_id:
-                            playlists.append({
-                                'id': playlist_id,
-                                'name': playlist_name,
-                                'tracks': track_count,
-                                'type': 'playlist'
-                            })
-                
-                print(f'Found {len(playlists)} Tidal playlists')
-                if playlists:
-                    return jsonify({'playlists': playlists})
+
+    try:
+        url = f'https://openapi.tidal.com/v2/playlists'
+        params = {
+            'countryCode': 'US', 
+            'filter[owners.id]': owner_id,}
         
-        except Exception as e:
-            print(f'Error with endpoint {endpoint}: {str(e)}')
-            continue
-    
-    # If all endpoints failed, return empty list
-    print('All endpoints failed, returning empty list')
-    return jsonify({'playlists': []})
+        print(f'Making request to: {url}')
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        print(f'Response status: {response.status_code}')
+        print(f'Response headers: {dict(response.headers)}')
+        print(f'Response body preview: {response.text[:500]}...')
+        
+        if response.status_code != 200:
+            print(f'ERROR: Non-200 status code')
+            print(f'Full response body: {response.text}')
+            return jsonify({'error': f'Failed to fetch Tidal playlists: {response.status_code}'}), 400
+        
+        data = response.json().get('data')
+        print(f'Items in response: {len(data)}')
+        
+        playlists = []
+        
+        for idx, item in enumerate(data):
+            attr = item.get("attributes")
+            name = attr.get('name', 'Untitled')
+            numItems = attr.get('numberOfItems')
+            print(f'  Playlist {idx+1}: {name} (id={item.get("id")}, tracks={numItems})')
+            playlists.append({
+                'id': item.get('id'),
+                'name': name,
+                'tracks': numItems,
+                'type': 'playlist'
+            })
+        
+        print(f'✓ Successfully parsed {len(playlists)} Tidal playlists')
+        return jsonify({'playlists': playlists})
+        
+    except Exception as e:
+        print(f'EXCEPTION: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to fetch Tidal playlists: {str(e)}'}), 500
 
 # Transfer playlist
 @app.route('/transfer', methods=['POST'])
 def transfer_playlist():
     spotify_token = session.get('spotify_token')
     tidal_token = session.get('tidal_token')
-    tidal_user_id = session.get('tidal_user_id')
     
     if not spotify_token or not tidal_token:
         return jsonify({'error': 'Not authenticated with both services'}), 401
@@ -433,13 +434,17 @@ def transfer_playlist():
     print(f'Type: {playlist_type}')
     
     spotify_headers = {'Authorization': f'Bearer {spotify_token}'}
+    tidal_headers = {
+        'Authorization': f'Bearer {tidal_token}',
+        'Accept': 'application/vnd.api+json',
+        'Content-Type': 'application/vnd.api+json'
+    }
     
     # Handle liked songs differently
     if playlist_id == 'liked' or playlist_type == 'liked':
         print('Transferring Liked Songs')
         playlist_name = 'Liked Songs (from Spotify)'
         
-        # Get liked songs
         tracks_response = requests.get(
             'https://api.spotify.com/v1/me/tracks?limit=50',
             headers=spotify_headers
@@ -464,7 +469,6 @@ def transfer_playlist():
         playlist_data = playlist_response.json()
         playlist_name = playlist_data['name']
         
-        # Get all tracks
         tracks_response = requests.get(
             f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks',
             headers=spotify_headers
@@ -478,41 +482,34 @@ def transfer_playlist():
     
     print(f'Found {len(spotify_tracks)} tracks to transfer')
     
-    # Create Tidal playlist using the unofficial endpoint
-    tidal_headers = {
-        'Authorization': f'Bearer {tidal_token}',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-    }
-    
-    # Try the unofficial v2 endpoint for creating playlists
+    # Create Tidal playlist
     create_response = requests.post(
-        'https://listen.tidal.com/v2/my-collection/playlists/folders/create-playlist',
+        f'https://openapi.tidal.com/v2/playlists',
         headers=tidal_headers,
+        params={'countryCode': 'US'},
         json={
-            'name': playlist_name,
-            'description': 'Transferred from Spotify via That\'s a wrap'
+            "data": {
+                "type": "playlists",
+                "attributes": {
+                    "name": playlist_name,
+                    "description": "Transfered from Spotify"
+                }
+            }
         }
     )
     
     print(f'Create playlist response: {create_response.status_code}')
-    print(f'Response: {create_response.text[:200]}')
     
     if create_response.status_code not in [200, 201]:
-        print(f'Failed to create playlist: {create_response.text}')
-        return jsonify({'error': f'Failed to create Tidal playlist. The Tidal API for playlist creation may not be available yet.'}), 400
+        status, title = create_response.json().get('status'),create_response.json().get('title')
+        return jsonify({'error': f'Failed to create Tidal playlist : {status} {title}'}), 400
     
     tidal_playlist_data = create_response.json()
-    # The response structure may vary, try different possible locations for the ID
-    tidal_playlist_id = (
-        tidal_playlist_data.get('data', {}).get('id') or 
-        tidal_playlist_data.get('id') or 
-        tidal_playlist_data.get('uuid')
-    )
+    tidal_playlist_id = tidal_playlist_data.get('data').get('id')
     
     if not tidal_playlist_id:
-        print(f'Playlist created but no ID found. Response: {tidal_playlist_data}')
-        return jsonify({'error': 'Playlist created but could not get playlist ID'}), 400
+        print(f'No playlist ID in response: {tidal_playlist_data}')
+        return jsonify({'error': 'Failed to get playlist ID'}), 400
     
     print(f'Created Tidal playlist: {tidal_playlist_id}')
     
@@ -520,40 +517,38 @@ def transfer_playlist():
     added_count = 0
     not_found = []
     
-    for track in spotify_tracks[:50]:  # Limit to first 50 for now
+    for track in spotify_tracks[:50]:  # Limit to first 50
         if not track:
             continue
         
         track_name = track.get('name', '')
         artist_name = track['artists'][0]['name'] if track.get('artists') else ''
         
-        # Search on Tidal using v2 API
+        # Search on Tidal
         search_response = requests.get(
-            'https://openapi.tidal.com/v2/searchresults/catalog',
-            headers=tidal_headers,
+            f'https://openapi.tidal.com/v2/searchResults/{track_name}%20{artist_name}',
+            headers={'Authorization': f'Bearer {tidal_token}'},
             params={
-                'query': f'{track_name} {artist_name}',
-                'type': 'TRACKS',
-                'limit': 1
+                'include': 'tracks',
+                'limit': 1,
+                'countryCode': 'US'
             }
         )
         
         if search_response.status_code == 200:
             search_data = search_response.json()
-            tracks = search_data.get('data', [])
+            tracks = search_data.get('tracks', {}).get('items', [])
             
-            if tracks and len(tracks) > 0:
-                tidal_track = tracks[0]
-                tidal_track_id = tidal_track.get('id')
+            if tracks:
+                tidal_track_id = tracks[0].get('id')
                 
                 if tidal_track_id:
                     # Add track to playlist
-                    add_response = requests.put(
+                    add_response = requests.post(
                         f'https://openapi.tidal.com/v2/playlists/{tidal_playlist_id}/items',
                         headers=tidal_headers,
-                        json={
-                            'trackIds': [tidal_track_id]
-                        }
+                        params={'countryCode': 'US'},
+                        json={'trackIds': [str(tidal_track_id)]}
                     )
                     
                     if add_response.status_code in [200, 201, 204]:
@@ -561,6 +556,7 @@ def transfer_playlist():
                         print(f'✓ Added: {track_name} - {artist_name}')
                     else:
                         print(f'✗ Failed to add: {track_name} - {artist_name}')
+                        not_found.append(f'{track_name} - {artist_name}')
                 else:
                     not_found.append(f'{track_name} - {artist_name}')
             else:
@@ -577,7 +573,7 @@ def transfer_playlist():
         'total_tracks': len(spotify_tracks),
         'tracks_added': added_count,
         'tracks_not_found': len(not_found),
-        'not_found_list': not_found[:10]  # Return first 10 not found
+        'not_found_list': not_found[:10]
     })
 
 if __name__ == '__main__':
