@@ -25,15 +25,16 @@ if not SECRET_KEY:
 app.secret_key = SECRET_KEY
 
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
-
-# Configure session to work with CORS
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to True if using HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_DOMAIN'] = None
-# Production / HTTPS
-# app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-# app.config['SESSION_COOKIE_SECURE'] = True
+FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+if FLASK_ENV == 'production':
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    app.config['SESSION_COOKIE_SECURE'] = True
+else:
+    # Configure session to work with CORS
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = False  # Set to True if using HTTPS
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_DOMAIN'] = None
 
 CORS(app, supports_credentials=True, origins=[FRONTEND_URL])
 

@@ -44,3 +44,8 @@ env-check: ## Verify environment variables are set
 
 dev: ## Run in development mode (with auto-reload)
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+push:
+	docker compose build
+	docker tag thatsawrap-app vulpiculus/thatsawrap-app:latest
+	docker push vulpiculus/thatsawrap-app:latest
