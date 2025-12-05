@@ -9,6 +9,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 from threading import Lock
+from functools import wraps
 
 
 # Load environment variables
@@ -61,10 +62,182 @@ def set_progress(user_id, progress, added=0, total=0, current_track=''):
 def get_progress(user_id):
     with progress_lock:
         return transfer_progress.get(user_id, {'progress': 0, 'added': 0, 'total': 0, 'current_track': ''})
+
+# ============================================================================
+# TOKEN REFRESH FUNCTIONS
+# ============================================================================
+
+def refresh_spotify_token():
+    """Refresh Spotify access token using refresh token"""
+    refresh_token = session.get('spotify_refresh_token')
     
+    if not refresh_token:
+        print('No Spotify refresh token available')
+        return False
+    
+    print('Refreshing Spotify token...')
+    
+    auth_str = f'{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}'
+    b64_auth = base64.b64encode(auth_str.encode()).decode()
+    
+    token_url = 'https://accounts.spotify.com/api/token'
+    headers = {
+        'Authorization': f'Basic {b64_auth}',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    data = {
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh_token
+    }
+    
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+        
+        if response.status_code == 200:
+            tokens = response.json()
+            session['spotify_token'] = tokens.get('access_token')
+            # Spotify may return a new refresh token
+            if tokens.get('refresh_token'):
+                session['spotify_refresh_token'] = tokens.get('refresh_token')
+            session['spotify_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+            session.modified = True
+            
+            print('✓ Spotify token refreshed successfully')
+            return True
+        else:
+            print(f'Failed to refresh Spotify token: {response.status_code}')
+            print(f'Response: {response.text}')
+            return False
+            
+    except Exception as e:
+        print(f'Exception refreshing Spotify token: {str(e)}')
+        return False
+
+def refresh_tidal_token():
+    """Refresh Tidal access token using refresh token"""
+    refresh_token = session.get('tidal_refresh_token')
+    
+    if not refresh_token:
+        print('No Tidal refresh token available')
+        return False
+    
+    print('Refreshing Tidal token...')
+    
+    auth_str = f'{TIDAL_CLIENT_ID}:{TIDAL_CLIENT_SECRET}'
+    b64_auth = base64.b64encode(auth_str.encode()).decode()
+    
+    token_url = 'https://auth.tidal.com/v1/oauth2/token'
+    headers = {
+        'Authorization': f'Basic {b64_auth}',
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
+    data = {
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh_token,
+        'client_id': TIDAL_CLIENT_ID
+    }
+    
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+        
+        if response.status_code == 200:
+            tokens = response.json()
+            session['tidal_token'] = tokens.get('access_token')
+            # Tidal may return a new refresh token
+            if tokens.get('refresh_token'):
+                session['tidal_refresh_token'] = tokens.get('refresh_token')
+            session['tidal_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+            session.modified = True
+            
+            print('✓ Tidal token refreshed successfully')
+            return True
+        else:
+            print(f'Failed to refresh Tidal token: {response.status_code}')
+            print(f'Response: {response.text}')
+            return False
+            
+    except Exception as e:
+        print(f'Exception refreshing Tidal token: {str(e)}')
+        return False
+
+def get_valid_spotify_token():
+    """Get a valid Spotify token, refreshing if necessary"""
+    token = session.get('spotify_token')
+    expires = session.get('spotify_token_expires')
+    
+    if not token:
+        return None
+    
+    # If we don't have expiry info, assume token is still valid
+    if not expires:
+        return token
+    
+    # Convert expires to naive datetime if it's offset-aware
+    if isinstance(expires, datetime):
+        if expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
+    
+    # If token expires in less than 5 minutes, refresh it
+    if datetime.now() + timedelta(minutes=5) >= expires:
+        if refresh_spotify_token():
+            return session.get('spotify_token')
+        return None
+    
+    return token
+
+def get_valid_tidal_token():
+    """Get a valid Tidal token, refreshing if necessary"""
+    token = session.get('tidal_token')
+    expires = session.get('tidal_token_expires')
+    
+    if not token:
+        return None
+    
+    # If we don't have expiry info, assume token is still valid
+    if not expires:
+        return token
+    
+    # Convert expires to naive datetime if it's offset-aware
+    if isinstance(expires, datetime):
+        if expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
+    
+    # If token expires in less than 5 minutes, refresh it
+    if datetime.now() + timedelta(minutes=5) >= expires:
+        if refresh_tidal_token():
+            return session.get('tidal_token')
+        return None
+    
+    return token
+
+# Decorator to require valid Spotify authentication
+def require_spotify_auth(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = get_valid_spotify_token()
+        if not token:
+            return jsonify({'error': 'Not authenticated with Spotify'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Decorator to require valid Tidal authentication
+def require_tidal_auth(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = get_valid_tidal_token()
+        if not token:
+            return jsonify({'error': 'Not authenticated with Tidal'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================================
+# OAUTH ENDPOINTS
+# ============================================================================
+
 # Spotify OAuth
 @app.route('/auth/spotify')
 def spotify_auth():
+    # Request offline_access to get refresh token
     scope = 'playlist-read-private playlist-read-collaborative user-library-read'
     auth_url = (
         f'https://accounts.spotify.com/authorize?'
@@ -123,9 +296,13 @@ def spotify_callback():
         tokens = response.json()
         
         session['spotify_token'] = tokens.get('access_token')
+        session['spotify_refresh_token'] = tokens.get('refresh_token')
+        session['spotify_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
         session.modified = True
         
         print(f'✓ Spotify token saved: {session["spotify_token"][:20]}...')
+        print(f'✓ Refresh token saved: {bool(session.get("spotify_refresh_token"))}')
+        print(f'✓ Token expires: {session.get("spotify_token_expires")}')
         
         return redirect(FRONTEND_URL)
         
@@ -250,10 +427,13 @@ def tidal_callback():
         session['tidal_token'] = tokens.get('access_token')
         session['tidal_owner_id'] = tokens.get('user_id')
         session['tidal_refresh_token'] = tokens.get('refresh_token')
+        session['tidal_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
         session.modified = True
         
         print(f'✓ Tidal token saved: {session["tidal_token"][:20]}...')
         print(f'✓ Owner ID: {session.get("tidal_owner_id")}')
+        print(f'✓ Refresh token saved: {bool(session.get("tidal_refresh_token"))}')
+        print(f'✓ Token expires: {session.get("tidal_token_expires")}')
 
         return redirect(FRONTEND_URL)
         
@@ -267,8 +447,9 @@ def auth_status():
     print('\n=== Auth Status Check ===')
     print(f'Session keys: {list(session.keys())}')
     
-    spotify_token = session.get('spotify_token')
-    tidal_token = session.get('tidal_token')
+    # Use the helper functions to get valid tokens
+    spotify_token = get_valid_spotify_token()
+    tidal_token = get_valid_tidal_token()
     tidal_owner_id = session.get('tidal_owner_id')
     
     spotify_status = bool(spotify_token)
@@ -277,11 +458,13 @@ def auth_status():
     print(f'Spotify authenticated: {spotify_status}')
     if spotify_status:
         print(f'  Spotify token: {spotify_token[:30]}...')
+        print(f'  Token expires: {session.get("spotify_token_expires")}')
     
     print(f'Tidal authenticated: {tidal_status}')
     if tidal_status:
         print(f'  Tidal token: {tidal_token[:30]}...')
         print(f'  Tidal owner ID: {tidal_owner_id}')
+        print(f'  Token expires: {session.get("tidal_token_expires")}')
     
     return jsonify({
         'spotify': spotify_status,
@@ -292,6 +475,8 @@ def auth_status():
 @app.route('/disconnect/spotify', methods=['POST'])
 def disconnect_spotify():
     session.pop('spotify_token', None)
+    session.pop('spotify_refresh_token', None)
+    session.pop('spotify_token_expires', None)
     print('Spotify disconnected')
     return jsonify({'success': True})
 
@@ -299,15 +484,20 @@ def disconnect_spotify():
 def disconnect_tidal():
     session.pop('tidal_token', None)
     session.pop('tidal_owner_id', None)
+    session.pop('tidal_refresh_token', None)
+    session.pop('tidal_token_expires', None)
     print('Tidal disconnected')
     return jsonify({'success': True})
 
+# ============================================================================
+# API ENDPOINTS (with automatic token refresh)
+# ============================================================================
+
 # Get Spotify playlists
 @app.route('/spotify/playlists')
+@require_spotify_auth
 def get_playlists():
-    token = session.get('spotify_token')
-    if not token:
-        return jsonify({'error': 'Not authenticated with Spotify'}), 401
+    token = get_valid_spotify_token()
     
     headers = {'Authorization': f'Bearer {token}'}
     
@@ -370,17 +560,14 @@ def get_playlists():
 
 # Get Tidal playlists
 @app.route('/tidal/playlists')
+@require_tidal_auth
 def get_tidal_playlists():
-    token = session.get('tidal_token')
+    token = get_valid_tidal_token()
     owner_id = session.get('tidal_owner_id')
 
     print('\n=== Fetching Tidal playlists ===')
     print(f'Token present: {bool(token)}')
     print(f'Token preview: {token[:30] if token else None}...')
-    
-    if not token:
-        print('ERROR: No Tidal token in session')
-        return jsonify({'error': 'Not authenticated with Tidal'}), 401
     
     headers = {
         'Authorization': f'Bearer {token}',
@@ -391,7 +578,8 @@ def get_tidal_playlists():
         url = f'https://openapi.tidal.com/v2/playlists'
         params = {
             'countryCode': 'US', 
-            'filter[owners.id]': owner_id,}
+            'filter[owners.id]': owner_id,
+        }
         
         print(f'Making request to: {url}')
         
@@ -435,8 +623,9 @@ def get_tidal_playlists():
 # Transfer playlist
 @app.route('/transfer', methods=['POST'])
 def transfer_playlist():
-    spotify_token = session.get('spotify_token')
-    tidal_token = session.get('tidal_token')
+    # Get valid tokens (with auto-refresh)
+    spotify_token = get_valid_spotify_token()
+    tidal_token = get_valid_tidal_token()
     
     if not spotify_token or not tidal_token:
         return jsonify({'error': 'Not authenticated with both services'}), 401
@@ -507,7 +696,7 @@ def transfer_playlist():
                 "type": "playlists",
                 "attributes": {
                     "name": playlist_name,
-                    "description": "Transfered from Spotify"
+                    "description": "Transferred from Spotify"
                 }
             }
         }
@@ -540,6 +729,11 @@ def transfer_playlist():
         track_name = track.get('name', '').replace('/', '')
         artist_name = track['artists'][0]['name'] if track.get('artists') else ''
         
+        # Refresh Tidal token if needed during long transfer
+        if idx % 20 == 0:  # Check every 20 tracks
+            tidal_token = get_valid_tidal_token()
+            tidal_headers['Authorization'] = f'Bearer {tidal_token}'
+        
         # Search on Tidal
         search_response = requests.get(
             f'https://openapi.tidal.com/v2/searchResults/{artist_name}%20{track_name}/relationships/tracks',
@@ -552,37 +746,34 @@ def transfer_playlist():
 
         if search_response.status_code == 200:
             search_data = search_response.json().get('data')
-            tidal_track_id = search_data[0].get('id')
-            if tidal_track_id:
-                search_response = requests.get(
-                    f'https://openapi.tidal.com/v2/searchResults/{tidal_track_id}',
-                    headers={'Authorization': f'Bearer {tidal_token}'},
-                    params={
-                        'countryCode': 'US',
-                    }
-                )
-                # Add track to playlist
-                add_response = requests.post(
-                    f'https://openapi.tidal.com/v2/playlists/{tidal_playlist_id}/relationships/items',
-                    headers=tidal_headers,
-                    params={'countryCode': 'US'},
-                    json={
-                        "data": [{
-                            "type": "tracks",
-                            "id": str(tidal_track_id)
-                        }],
-                    }
-                )
-                
-                if add_response.status_code in [200, 201, 204]:
-                    added_count += 1
-                    print(f'✓ Added: {track_name} - {artist_name}')
+            if search_data and len(search_data) > 0:
+                tidal_track_id = search_data[0].get('id')
+                if tidal_track_id:
+                    # Add track to playlist
+                    add_response = requests.post(
+                        f'https://openapi.tidal.com/v2/playlists/{tidal_playlist_id}/relationships/items',
+                        headers=tidal_headers,
+                        params={'countryCode': 'US'},
+                        json={
+                            "data": [{
+                                "type": "tracks",
+                                "id": str(tidal_track_id)
+                            }],
+                        }
+                    )
+                    
+                    if add_response.status_code in [200, 201, 204]:
+                        added_count += 1
+                        print(f'✓ Added: {track_name} - {artist_name}')
+                    else:
+                        print(f'✗ Failed to add: {track_name} - {artist_name}')
+                        not_found.append(f'{track_name} - {artist_name}')
                 else:
-                    print(f'✗ Failed to add: {track_name} - {artist_name}')
                     not_found.append(f'{track_name} - {artist_name}')
+                    print(f'✗ Not found on Tidal: {track_name} - {artist_name}')
             else:
                 not_found.append(f'{track_name} - {artist_name}')
-                print(f'✗ Not found on Tidal: {track_name} - {artist_name}')
+                print(f'✗ No results for: {track_name} - {artist_name}')
         else:
             not_found.append(f'{track_name} - {artist_name}')
             print(f'✗ Search failed for: {track_name} - {artist_name}')
