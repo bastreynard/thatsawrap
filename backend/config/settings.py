@@ -61,6 +61,17 @@ class TidalConfig:
     API_BASE_URL = 'https://openapi.tidal.com/v2'
     COUNTRY_CODE = 'US'
 
+class QobuzConfig:
+    """Qobuz API configuration."""
+    
+    # Qobuz uses App ID and App Secret (not OAuth client credentials)
+    APP_ID = os.getenv('QOBUZ_CLIENT_ID')
+    APP_SECRET = os.getenv('QOBUZ_CLIENT_SECRET')
+    
+    # API endpoints
+    AUTH_URL = 'https://www.qobuz.com/api.json/0.2/user/login'
+    TOKEN_URL = 'https://www.qobuz.com/api.json/0.2/user/login'
+    API_BASE_URL = 'https://www.qobuz.com/api.json/0.2'
 
 # Version info
 VERSION_TAG = os.getenv('VERSION_TAG', 'dev')
