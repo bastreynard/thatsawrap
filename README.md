@@ -17,13 +17,13 @@ A Flask application with React frontend that transfers playlists from Spotify to
 
 ```
 .
-├── backend.py                 # Flask backend
+├── backend/                   # Flask backend
 ├── requirements.txt           # Python dependencies
 ├── Dockerfile                 # Production backend Dockerfile
 ├── docker-compose.yml         # Production orchestration
 ├── nginx.conf                 # Nginx configuration for frontend
-├── .env.example              # Environment variables template
-└── thatsawrap-react/         # React frontend (git submodule)
+├── .env.example               # Environment variables template
+└── thatsawrap-react/          # React frontend (git submodule)
 ```
 
 ## Prerequisites
@@ -39,7 +39,6 @@ A Flask application with React frontend that transfers playlists from Spotify to
 
 ```bash
 git clone --recurse-submodules https://github.com/bastreynard/thatsawrap
-cd thatsawrap
 
 # If you already cloned without --recurse-submodules:
 git submodule init
@@ -84,8 +83,8 @@ docker-compose down
 ```
 
 The application will be available at:
-- **Frontend:** http://localhost (port 80)
-- **Backend API:** http://localhost/api (proxied through Nginx)
+- **Frontend:** http://localhost:8080
+- **Backend API:** http://localhost:8080/api (proxied through Nginx)
 
 ## Using the Makefile
 
@@ -123,7 +122,7 @@ make push          # Push to docker registry
 
 ## Development
 
-### Running Locally Without Docker
+### Running Backend Locally Without Docker
 
 ```bash
 # Create virtual environment
@@ -135,6 +134,14 @@ pip install -r requirements.txt
 
 # Run the application
 python backend.py
+```
+### Running Frontend Locally Without Docker
+
+Requires node.js and npm to be installed
+
+```bash
+npm install
+npm start
 ```
 
 ## Security Notes
