@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, redirect, session, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 import requests
 import base64
 import os
@@ -62,6 +62,35 @@ def set_progress(user_id, progress, added=0, total=0, current_track=''):
 def get_progress(user_id):
     with progress_lock:
         return transfer_progress.get(user_id, {'progress': 0, 'added': 0, 'total': 0, 'current_track': ''})
+
+def sanitize_search_query(text):
+    """
+    Sanitize text for search queries by removing special characters
+    that might break the search or cause poor results.
+    """
+    if not text:
+        return ''
+    
+    import re
+    
+    # Remove content in parentheses (often remix info, features, etc.)
+    # Example: "Song (Remix)" -> "Song", "Song (feat. Artist)" -> "Song"
+    text = re.sub(r'\([^)]*\)', '', text)
+    
+    # Remove content in brackets
+    text = re.sub(r'\[[^\]]*\]', '', text)
+    
+    # Remove common special characters that break searches
+    # Keep: letters, numbers, spaces, apostrophes
+    text = re.sub(r'[^\w\s\'-]', ' ', text)
+    
+    # Replace multiple spaces with single space
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    
+    return text
 
 # ============================================================================
 # TOKEN REFRESH FUNCTIONS
@@ -649,16 +678,37 @@ def transfer_playlist():
         print('Transferring Liked Songs')
         playlist_name = 'Liked Songs (from Spotify)'
         
-        tracks_response = requests.get(
-            'https://api.spotify.com/v1/me/tracks?limit=50',
-            headers=spotify_headers
-        )
+        # Fetch all liked songs with pagination
+        spotify_tracks = []
+        offset = 0
+        limit = 50
         
-        if tracks_response.status_code != 200:
-            return jsonify({'error': 'Failed to fetch liked songs'}), 400
+        while True:
+            tracks_response = requests.get(
+                f'https://api.spotify.com/v1/me/tracks?limit={limit}&offset={offset}',
+                headers=spotify_headers
+            )
+            
+            if tracks_response.status_code != 200:
+                return jsonify({'error': 'Failed to fetch liked songs'}), 400
+            
+            tracks_data = tracks_response.json()
+            items = tracks_data.get('items', [])
+            
+            if not items:
+                break
+            
+            spotify_tracks.extend([item['track'] for item in items if item.get('track')])
+            
+            print(f'Fetched {len(items)} liked songs (offset {offset})')
+            
+            # Check if there are more tracks
+            if tracks_data.get('next') is None:
+                break
+            
+            offset += limit
         
-        tracks_data = tracks_response.json()
-        spotify_tracks = [item['track'] for item in tracks_data.get('items', []) if item.get('track')]
+        print(f'Total liked songs fetched: {len(spotify_tracks)}')
         
     else:
         # Get regular playlist
@@ -673,16 +723,37 @@ def transfer_playlist():
         playlist_data = playlist_response.json()
         playlist_name = playlist_data['name']
         
-        tracks_response = requests.get(
-            f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks',
-            headers=spotify_headers
-        )
+        # Fetch all playlist tracks with pagination
+        spotify_tracks = []
+        offset = 0
+        limit = 100
         
-        if tracks_response.status_code != 200:
-            return jsonify({'error': 'Failed to fetch tracks'}), 400
+        while True:
+            tracks_response = requests.get(
+                f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks?limit={limit}&offset={offset}',
+                headers=spotify_headers
+            )
+            
+            if tracks_response.status_code != 200:
+                return jsonify({'error': 'Failed to fetch tracks'}), 400
+            
+            tracks_data = tracks_response.json()
+            items = tracks_data.get('items', [])
+            
+            if not items:
+                break
+            
+            spotify_tracks.extend([item['track'] for item in items if item.get('track')])
+            
+            print(f'Fetched {len(items)} tracks (offset {offset})')
+            
+            # Check if there are more tracks
+            if tracks_data.get('next') is None:
+                break
+            
+            offset += limit
         
-        tracks_data = tracks_response.json()
-        spotify_tracks = [item['track'] for item in tracks_data.get('items', []) if item.get('track')]
+        print(f'Total playlist tracks fetched: {len(spotify_tracks)}')
     
     print(f'Found {len(spotify_tracks)} tracks to transfer')
     
@@ -721,41 +792,48 @@ def transfer_playlist():
     added_count = 0
     not_found = []
     
-    for idx, track in enumerate(spotify_tracks):
+    for idx, track in enumerate(spotify_tracks[:100]):  # Limit to first 100
         if not track:
             continue
         progress = int(((idx + 1) / len(spotify_tracks)) * 100)
         set_progress(session.get("tidal_owner_id"), progress)
-        track_name = track.get('name', '').replace('/', '')
-        artist_name = track['artists'][0]['name'].replace('/', '') if track.get('artists') else ''
+        
+        # Get track and artist names
+        track_name = track.get('name', '')
+        artist_name = track['artists'][0]['name'] if track.get('artists') else ''
+        
+        # Sanitize for search (remove special characters)
+        track_name_clean = sanitize_search_query(track_name)
+        artist_name_clean = sanitize_search_query(artist_name)
+        
+        # Log original and cleaned versions
+        if track_name != track_name_clean or artist_name != artist_name_clean:
+            print(f'Sanitized: "{track_name} - {artist_name}" -> "{track_name_clean} - {artist_name_clean}"')
         
         # Refresh Tidal token if needed during long transfer
-        if idx % 50 == 0:  # Check every 50 tracks
+        if idx % 20 == 0:  # Check every 20 tracks
             tidal_token = get_valid_tidal_token()
             tidal_headers['Authorization'] = f'Bearer {tidal_token}'
         
-        # Search on Tidal
+        # Search on Tidal using cleaned query
+        search_query = f'{artist_name_clean} {track_name_clean}'.strip()
+        
+        # URL-encode the search query (spaces become %20, etc.)
+        search_query_encoded = quote(search_query)
+        
         search_response = requests.get(
-            f'https://openapi.tidal.com/v2/searchResults/{artist_name}%20{track_name}/relationships/tracks',
+            f'https://openapi.tidal.com/v2/searchResults/{search_query_encoded}/relationships/tracks',
             headers={'Authorization': f'Bearer {tidal_token}'},
             params={
-                'explicitFilter': 'include, exclude',
+                'explicitFilter': 'include',
                 'countryCode': 'US',
             }
         )
-        if search_response.status_code != 200:
-            search_response = requests.get(
-                f'https://openapi.tidal.com/v2/searchResults/{artist_name}%20{track_name}/relationships/topHits',
-                headers={'Authorization': f'Bearer {tidal_token}'},
-                params={
-                    'explicitFilter': 'include, exclude',
-                    'countryCode': 'US',
-                }
-            )
+
         if search_response.status_code == 200:
             search_data = search_response.json().get('data')
             if search_data and len(search_data) > 0:
-                tidal_track_id = search_data[0].get('id') if isinstance(search_data, list) else search_data.get('id')
+                tidal_track_id = search_data[0].get('id')
                 if tidal_track_id:
                     # Add track to playlist
                     add_response = requests.post(
@@ -788,7 +866,7 @@ def transfer_playlist():
     
     print(f'\n=== Transfer complete ===')
     print(f'Added: {added_count}/{len(spotify_tracks)}')
-    set_progress(session.get("tidal_owner_id"), 0, added_count, len(spotify_tracks), track_name)
+
     return jsonify({
         'success': added_count != 0,
         'playlist_name': playlist_name,

@@ -1,4 +1,4 @@
-# Spotify to Tidal Playlist Transfer - Docker Deployment
+# Spotify to Tidal Playlist Transfer
 
 A Flask application with React frontend that transfers playlists from Spotify to Tidal, fully containerized with Docker for easy deployment.
 
