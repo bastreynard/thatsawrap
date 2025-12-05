@@ -1,3 +1,4 @@
+import time
 from flask import Flask, request, jsonify, redirect, session, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -7,7 +8,6 @@ import base64
 import os
 import hashlib
 import secrets
-from datetime import datetime, timedelta
 from threading import Lock
 from functools import wraps
 
@@ -128,7 +128,7 @@ def refresh_spotify_token():
             # Spotify may return a new refresh token
             if tokens.get('refresh_token'):
                 session['spotify_refresh_token'] = tokens.get('refresh_token')
-            session['spotify_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+            session['spotify_token_expires'] = time.time() + 3600
             session.modified = True
             
             print('✓ Spotify token refreshed successfully')
@@ -175,7 +175,7 @@ def refresh_tidal_token():
             # Tidal may return a new refresh token
             if tokens.get('refresh_token'):
                 session['tidal_refresh_token'] = tokens.get('refresh_token')
-            session['tidal_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+            session['tidal_token_expires'] = time.time() + 3600
             session.modified = True
             
             print('✓ Tidal token refreshed successfully')
@@ -201,13 +201,8 @@ def get_valid_spotify_token():
     if not expires:
         return token
     
-    # Convert expires to naive datetime if it's offset-aware
-    if isinstance(expires, datetime):
-        if expires.tzinfo is not None:
-            expires = expires.replace(tzinfo=None)
-    
     # If token expires in less than 5 minutes, refresh it
-    if datetime.now() + timedelta(minutes=5) >= expires:
+    if time.time() + 300  >= expires:
         if refresh_spotify_token():
             return session.get('spotify_token')
         return None
@@ -226,13 +221,8 @@ def get_valid_tidal_token():
     if not expires:
         return token
     
-    # Convert expires to naive datetime if it's offset-aware
-    if isinstance(expires, datetime):
-        if expires.tzinfo is not None:
-            expires = expires.replace(tzinfo=None)
-    
     # If token expires in less than 5 minutes, refresh it
-    if datetime.now() + timedelta(minutes=5) >= expires:
+    if time.time() + 300 >= expires:
         if refresh_tidal_token():
             return session.get('tidal_token')
         return None
@@ -326,7 +316,7 @@ def spotify_callback():
         
         session['spotify_token'] = tokens.get('access_token')
         session['spotify_refresh_token'] = tokens.get('refresh_token')
-        session['spotify_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+        session['spotify_token_expires'] = time.time() + 3600
         session.modified = True
         
         print(f'✓ Spotify token saved: {session["spotify_token"][:20]}...')
@@ -354,14 +344,15 @@ def tidal_auth():
     state = secrets.token_urlsafe(32)
     
     # Store code_verifier with state as key
-    pkce_store[state] = {
+    session['pkce'] = {
+        'state': state,
         'verifier': code_verifier,
-        'expires': datetime.now() + timedelta(minutes=10)
+        'expires': time.time() + 600   # 10 minutes from now
     }
     
     print(f'Generated PKCE code_verifier: {code_verifier[:20]}...')
     print(f'Generated PKCE code_challenge: {code_challenge[:20]}...')
-    print(f'State parameter: {state[:20]}...')
+    print(f'State parameter: {state}...')
     
     # Build authorization URL
     params = {
@@ -390,7 +381,7 @@ def tidal_callback():
     
     print(f'\n=== Tidal OAuth Callback ===')
     print(f'Authorization code: {code[:20] if code else None}...')
-    print(f'State: {state[:20] if state else None}...')
+    print(f'State: {state if state else None}...')
     print(f'Error: {error}')
     
     if error:
@@ -403,16 +394,17 @@ def tidal_callback():
         return '<h2>Missing parameters</h2><p><a href="/auth/tidal">Try again</a></p>', 400
     
     # Retrieve code_verifier
-    pkce_data = pkce_store.get(state)
+    pkce_data = session.get('pkce')
     
     if not pkce_data:
-        print(f'ERROR: No PKCE data found for state: {state[:20]}...')
+        print(f'ERROR: No PKCE data found for state: {state}...')
+        session.pop('pkce', None)
         return '<h2>Session expired</h2><p>PKCE state not found. <a href="/auth/tidal">Try again</a></p>', 400
     
     # Check if expired
-    if datetime.now() > pkce_data['expires']:
+    if time.time() > pkce_data['expires']:
         print('PKCE data expired')
-        pkce_store.pop(state, None)
+        session.pop('pkce', None)
         return '<h2>Session expired</h2><p>Please <a href="/auth/tidal">try again</a></p>', 400
     
     code_verifier = pkce_data['verifier']
@@ -456,7 +448,7 @@ def tidal_callback():
         session['tidal_token'] = tokens.get('access_token')
         session['tidal_owner_id'] = tokens.get('user_id')
         session['tidal_refresh_token'] = tokens.get('refresh_token')
-        session['tidal_token_expires'] = datetime.now() + timedelta(seconds=tokens.get('expires_in', 3600))
+        session['tidal_token_expires'] = time.time() + 3600
         session.modified = True
         
         print(f'✓ Tidal token saved: {session["tidal_token"][:20]}...')
