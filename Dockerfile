@@ -15,6 +15,12 @@ RUN npm run build
 # Production stage with Python and Nginx
 FROM python:3.11-slim
 
+# Version variables
+ARG VERSION_TAG=dev
+ARG GIT_COMMIT_HASH=unknown
+ENV VERSION_TAG=${VERSION_TAG}
+ENV GIT_COMMIT_HASH=${GIT_COMMIT_HASH}
+
 WORKDIR /app
 
 # Install nginx and supervisor

@@ -2,6 +2,9 @@ services:
   app:
     build:
       context: .
+      args:
+          VERSION_TAG: ${VERSION_TAG:-dev}
+          GIT_COMMIT_HASH: ${GIT_COMMIT_HASH:-unknown}
     container_name: thatsawrap.app
     ports:
       - "8080:8080"

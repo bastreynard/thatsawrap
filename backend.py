@@ -877,5 +877,17 @@ def transfer_progress_endpoint():
     user_id = session.get("tidal_owner_id")
     return jsonify(get_progress(user_id))
 
+@app.route('/version')
+def get_version():
+    """
+    Get version information from environment variables.
+    These are typically set in the Dockerfile or docker-compose.yml
+    """
+    version_info = {
+        'tag': os.getenv('VERSION_TAG', 'dev'),
+        'hash': os.getenv('GIT_COMMIT_HASH', 'unknown')
+    }
+    return jsonify(version_info)
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
