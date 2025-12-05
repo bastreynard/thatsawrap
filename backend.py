@@ -792,7 +792,7 @@ def transfer_playlist():
     added_count = 0
     not_found = []
     
-    for idx, track in enumerate(spotify_tracks[:100]):  # Limit to first 100
+    for idx, track in enumerate(spotify_tracks):
         if not track:
             continue
         progress = int(((idx + 1) / len(spotify_tracks)) * 100)
@@ -805,10 +805,6 @@ def transfer_playlist():
         # Sanitize for search (remove special characters)
         track_name_clean = sanitize_search_query(track_name)
         artist_name_clean = sanitize_search_query(artist_name)
-        
-        # Log original and cleaned versions
-        if track_name != track_name_clean or artist_name != artist_name_clean:
-            print(f'Sanitized: "{track_name} - {artist_name}" -> "{track_name_clean} - {artist_name_clean}"')
         
         # Refresh Tidal token if needed during long transfer
         if idx % 20 == 0:  # Check every 20 tracks
@@ -829,7 +825,15 @@ def transfer_playlist():
                 'countryCode': 'US',
             }
         )
-
+        if search_response.status_code != 200:
+            search_response = requests.get(
+                f'https://openapi.tidal.com/v2/searchResults/{artist_name}%20{track_name}/relationships/topHits',
+                headers={'Authorization': f'Bearer {tidal_token}'},
+                params={
+                    'explicitFilter': 'include, exclude',
+                    'countryCode': 'US',
+                }
+            )
         if search_response.status_code == 200:
             search_data = search_response.json().get('data')
             if search_data and len(search_data) > 0:

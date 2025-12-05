@@ -25,7 +25,7 @@ shell: ## Open a shell in the running container
 
 clean: ## Remove container, image, and volumes
 	docker-compose down -v
-	docker rmi spotify-tidal-transfer_app 2>/dev/null || true
+	docker rmi thatsawrap-app 2>/dev/null || true
 
 status: ## Show container status
 	docker-compose ps
