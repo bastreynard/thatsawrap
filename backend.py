@@ -658,6 +658,9 @@ def transfer_playlist():
     print(f'Playlist ID: {playlist_id}')
     print(f'Type: {playlist_type}')
     
+    user_id = session.get("tidal_owner_id")
+    set_progress(user_id, 0, 0, 0, '')
+
     spotify_headers = {'Authorization': f'Bearer {spotify_token}'}
     tidal_headers = {
         'Authorization': f'Bearer {tidal_token}',
