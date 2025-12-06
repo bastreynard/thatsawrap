@@ -1,12 +1,13 @@
-# Spotify to Tidal Playlist Transfer
+# Spotify Playlist Transfer
 
-A Flask application with React frontend that transfers playlists from Spotify to Tidal, fully containerized with Docker for easy deployment.
+A Flask application with React frontend that transfers playlists from Spotify to Tidal and Qobuz.
 
 ## Features
 
-- 🎵 Transfer playlists from Spotify to Tidal
+- 🎵 Transfer playlists from Spotify to Tidal and Qobuz
 - 💚 Support for Liked Songs
-- 🔐 Secure OAuth authentication for both services
+- 🔐 Secure OAuth authentication for Spotify and Tidal
+- 🔐 email/password Qobuz authentication
 - ⚛️ React frontend with responsive design
 - 🐳 Fully containerized with Docker (backend + frontend)
 - 🚀 Production-ready with Gunicorn and Nginx
