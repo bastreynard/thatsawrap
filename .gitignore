@@ -14,3 +14,4 @@ yarn-error.log*
 .npm/
 venv/
 .env
+__pycache__/
